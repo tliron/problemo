@@ -1,0 +1,84 @@
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+RESET='\033[0m'
+
+# Colored messages (blue is the default)
+# Examples:
+#   m "hello world"
+#   m "hello world" "$GREEN"
+function m () {
+	local COLOR=${2:-$BLUE}
+	echo -e "$COLOR$1$RESET"
+}
+
+function copy_function () {
+	local ORIG_FUNC=$(declare -f $1)
+	local NEWNAME_FUNC="$2${ORIG_FUNC#$1}"
+	eval "$NEWNAME_FUNC"
+}
+
+function git_version () {
+	VERSION=$(git -C "$ROOT" describe --tags --always 2> /dev/null || echo '')
+	SHORT_VERSION=$(git -C "$ROOT" describe --tags --always --abbrev=0 2> /dev/null || echo '')
+	REVISION=$(git -C "$ROOT" rev-parse HEAD 2> /dev/null || echo '')
+	TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S %Z")
+	GO_VERSION=$(go version | { read _ _ v _; echo ${v#go}; })
+}
+
+function only_root () {
+        if [ "$EUID" -ne 0 ]; then
+                m "Run this script as root" "$RED"
+                exit 1
+        fi
+}
+
+function not_root () {
+        if [ "$EUID" == 0 ]; then
+                m "Do not run this script as root" "$RED"
+                exit 1
+        fi
+}
+
+function install_tool () {
+	local NAME=$1
+	local VERSION=$2
+	local URL=$3
+	local STRIP=${4:-1}
+	local ARCHIVE_PREFIX=$5
+	local EXEC=/usr/bin/$NAME
+
+	if [ -f "$EXEC" ]; then
+		if [ "$FORCE" == true ]; then
+			m "overriding existing \"$EXEC\"..."
+		else
+			m "\"$EXEC\" already exists (use -f to overwrite)"
+			return 0
+		fi
+	fi
+
+	m "downloading $NAME $VERSION..."
+	if [ "${URL: -7}" == .tar.gz ] || [ "${URL: -4}" == .tgz ]; then
+		local ARCHIVE=$(mktemp --suffix=.tar.gz)
+		if curl --silent --location --output "$ARCHIVE" "$URL"; then
+			if tar --extract --file="$ARCHIVE" --directory=/usr/bin --strip="$STRIP" "$ARCHIVE_PREFIX$NAME"; then
+				rm --force "$ARCHIVE"
+			else
+				m "could not write to \"$EXEC\"" "$RED"
+				rm --force "$ARCHIVE"
+			fi
+		else
+			m "could not download from \"$URL\"" "$RED"
+			return
+		fi
+	else
+		if ! curl --silent --location --output "$EXEC" "$URL"; then
+			m "could not download from \"$URL\" to \"$EXEC\"" "$RED"
+			return
+		fi
+	fi
+
+	chmod a+x "$EXEC"
+	m "installed \"$EXEC\""
+}

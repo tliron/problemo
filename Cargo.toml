@@ -1,0 +1,28 @@
+[package]
+edition = "2024"
+
+name = "problemo"
+description = "Problemo"
+version = "0.0.1"
+rust-version = "1.92"
+
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tliron/problemo"
+documentation = "https://docs.rs/problemo"
+authors = ["Tal Liron"]
+
+readme = "README.md"
+
+categories = ["development-tools"] # https://crates.io/category_slugs
+keywords = ["error"]
+
+[dependencies]
+backtrace = "0.3.76"
+
+[dev-dependencies]
+derive_more = { version = "2.1.1", features = ["display", "error", "from"] }
+
+# https://stackoverflow.com/a/61417700
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

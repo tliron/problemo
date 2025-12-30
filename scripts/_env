@@ -1,0 +1,7 @@
+_HERE=$(dirname "$(readlink --canonicalize "$BASH_SOURCE")")
+
+. "$_HERE/_functions"
+
+ROOT=$(readlink --canonicalize "$_HERE/..")
+
+TARGET=${TARGET:-debug}

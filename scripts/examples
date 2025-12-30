@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+HERE=$(dirname "$(readlink --canonicalize "$BASH_SOURCE")")
+. "$HERE/_env"
+
+cd "$ROOT"
+
+for E in $(cargo run --example 2>&1 | grep --extended-regexp '^    ' | sort); do
+    m "\nexample: $E\n" "$RED"
+	# Note: specifying the "serde" feature is actually unneeded here, but why?
+	RUSTFLAGS='-Z threads=8 --codegen linker=clang --codegen link-arg=--ld-path=wild' \
+	cargo +nightly run --quiet --example "$E" --features=derive,serde
+done
