@@ -3,7 +3,7 @@ edition = "2024"
 
 name = "problemo"
 description = "Problemo"
-version = "0.0.1"
+version = "0.0.2"
 rust-version = "1.92"
 
 license = "MIT OR Apache-2.0"
@@ -17,10 +17,38 @@ categories = ["development-tools"] # https://crates.io/category_slugs
 keywords = ["error"]
 
 [dependencies]
-backtrace = "0.3.76"
+anyhow = { optional = true, version = "1.0.100" }
+backtrace = { optional = true, version = "0.3.76" }
+serde = { optional = true, version = "1.0.228" }
 
 [dev-dependencies]
-derive_more = { version = "2.1.1", features = ["display", "error", "from"] }
+derive_more = { version = "2.1.1", features = ["display", "error"] }
+
+[features]
+## Support backtrace attachments.
+backtrace = ["dep:backtrace"]
+
+## Anyhow error compatibility.
+anyhow = ["dep:anyhow"]
+
+## Serde error compatibility.
+serde = ["dep:serde"]
+
+[[example]]
+name = "errors"
+required-features = ["backtrace"]
+
+[[example]]
+name = "backtrace"
+required-features = ["backtrace"]
+
+[[example]]
+name = "serde"
+required-features = ["serde"]
+
+[[example]]
+name = "anyhow"
+required-features = ["anyhow"]
 
 # https://stackoverflow.com/a/61417700
 [package.metadata.docs.rs]

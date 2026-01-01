@@ -1,9 +1,6 @@
-use super::{as_error::*, captured::*, cause::*};
+use super::{attachment::*, cause::*, error::*};
 
-use {
-    backtrace::*,
-    std::{any::*, collections::*, error::*, fmt},
-};
+use std::{any::*, collections::*, error::*, fmt, io};
 
 //
 // Problem
@@ -15,12 +12,14 @@ use {
 /// [into_error](Problem::into_error).
 #[derive(Default)]
 pub struct Problem {
-    /// Causes in order of causation, from top to root.
+    /// Causes in order of causation from top to root.
     pub causes: VecDeque<Cause>,
 }
 
 impl Problem {
-    /// Into error.
+    /// Add support for [Error].
+    ///
+    /// Take care to avoid adding it into a [Problem]'s causation chain.
     pub fn into_error(self) -> ProblemAsError {
         self.into()
     }
@@ -45,98 +44,26 @@ impl Problem {
         self.causes.back_mut()
     }
 
-    /// Errors in order of causation, from top to root.
-    ///
-    /// Note that this will skip over [source](Error::source).
-    pub fn errors(&self) -> impl Iterator<Item = &CapturedError> {
-        self.causes.iter().map(|cause| &cause.error)
-    }
-
-    /// The first cause with an error of a type.
-    ///
-    /// Will recurse into [source](Error::source).
-    pub fn get<'own, ErrorT>(&'own self) -> Option<CauseRef<'own, ErrorT>>
-    where
-        ErrorT: 'static + Error,
-    {
-        for (depth, cause) in self.causes.iter().enumerate() {
-            if let Some(error) = downcast_error_or_source(cause.error.as_ref()) {
-                return Some(CauseRef {
-                    problem: self,
-                    depth,
-                    error,
-                    attachments: &cause.attachments,
-                });
-            }
-        }
-        None
-    }
-
-    /// Whether we have an error in the causation chain.
-    ///
-    /// Will recurse into [source](Error::source).
-    pub fn has<ErrorT>(&self, error: ErrorT) -> bool
-    where
-        ErrorT: 'static + Error + PartialEq,
-    {
-        self.get()
-            .map(|cause| error == *cause.error)
-            .unwrap_or(false)
-    }
-
-    /// Whether we have an error of a type in the causation chain.
-    ///
-    /// Will recurse into [source](Error::source).
-    pub fn has_type<ErrorT>(&self) -> bool
-    where
-        ErrorT: 'static + Error,
-    {
-        for cause in &self.causes {
-            if downcast_error_or_source::<ErrorT>(cause.error.as_ref()).is_some() {
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Adds the error to the top of the causation chain.
-    pub fn via<ErrorT>(mut self, error: ErrorT) -> Self
-    where
-        ErrorT: 'static + Error,
-    {
-        self.causes.push_front(error.into());
-        self
-    }
-
-    /// Inserts our causation chain behind that of the given problem.
-    pub fn behind(mut self, mut problem: Problem) -> Self {
+    /// Inserts our causation chain under that of the given problem.
+    pub fn under(mut self, mut problem: Problem) -> Self {
         self.causes.append(&mut problem.causes);
         problem.causes = self.causes;
         problem
     }
 
-    /// All attachments.
-    pub fn attachments(&self) -> impl Iterator<Item = &CapturedAttachment> {
-        self.causes
-            .iter()
-            .flat_map(|cause| cause.attachments.iter())
+    /// Appends our causation chain above that of the given problem.
+    pub fn above(mut self, mut problem: Problem) -> Self {
+        problem.causes.append(&mut self.causes);
+        problem
     }
 
-    /// All attachments of a type.
-    pub fn attachments_of<'own, AttachmentT>(&'own self) -> impl Iterator<Item = &'own AttachmentT>
+    /// Adds the error to the top of the causation chain.
+    pub fn via<ErrorT>(mut self, error: ErrorT) -> Self
     where
-        AttachmentT: 'static,
+        ErrorT: 'static + Error + Send + Sync,
     {
-        self.attachments()
-            .filter_map(|attachment| attachment.downcast_ref())
-    }
-
-    /// First attachment of a type.
-    pub fn attachment_of<'own, AttachmentT>(&'own self) -> Option<&'own AttachmentT>
-    where
-        AttachmentT: 'static,
-    {
-        self.attachments_of().next()
+        self.causes.push_front(error.into());
+        self
     }
 
     /// Attach to the top cause.
@@ -145,55 +72,78 @@ impl Problem {
         AttachmentT: Any + Send + Sync,
     {
         if let Some(cause) = self.top_mut() {
-            cause.attachments.push(Box::new(attachment));
+            cause.attach(attachment);
         }
         self
     }
 
     /// Attach to the top cause if [Some].
-    pub fn maybe_with<AttachmentT>(self, attachment: Option<AttachmentT>) -> Self
+    pub fn maybe_with<AttachmentT>(mut self, attachment: Option<AttachmentT>) -> Self
     where
         AttachmentT: Any + Send + Sync,
     {
-        match attachment {
-            Some(attachment) => self.with(attachment),
-            None => self,
+        if let Some(attachment) = attachment
+            && let Some(cause) = self.top_mut()
+        {
+            cause.attach(attachment);
         }
+        self
     }
 
-    /// Attach backtrace.
-    pub fn with_backtrace(self) -> Self {
-        self.with(Backtrace::new())
+    /// Attach a backtrace if we don't already have one.
+    #[cfg(feature = "backtrace")]
+    pub fn with_backtrace(mut self) -> Self {
+        if self.attachment_of_type::<backtrace::Backtrace>().is_none()
+            && let Some(cause) = self.top_mut()
+        {
+            cause.attach_backtrace();
+        }
+        self
+    }
+}
+
+impl CausationChain<'_> for Problem {
+    fn owning_problem(&self) -> &Problem {
+        self
+    }
+}
+
+impl Attachments for Problem {
+    fn attachments(&self) -> impl Iterator<Item = &CapturedAttachment> {
+        self.into_iter().flat_map(|cause| cause.attachments.iter())
     }
 }
 
 impl fmt::Debug for Problem {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let errors: Vec<_> = self
-            .causes
-            .iter()
-            .map(|cause| format!("{:?}", cause.error))
-            .collect();
-
-        write!(formatter, "{}", errors.join("\n"))
+        let mut iterator = self.into_iter().peekable();
+        while let Some(cause) = iterator.next() {
+            write!(formatter, "{:?}", cause.error)?;
+            if iterator.peek().is_some() {
+                writeln!(formatter)?;
+            }
+        }
+        Ok(())
     }
 }
 
 impl fmt::Display for Problem {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let errors: Vec<_> = self
-            .causes
-            .iter()
-            .map(|cause| format!("{}", cause.error))
-            .collect();
-
-        write!(formatter, "{}", errors.join(": "))
+        let mut iterator = self.into_iter().peekable();
+        while let Some(cause) = iterator.next() {
+            write!(formatter, "{}", cause.error)?;
+            if iterator.peek().is_some() {
+                write!(formatter, ": ")?;
+            }
+        }
+        Ok(())
     }
 }
 
+#[cfg(feature = "backtrace")]
 impl<ErrorT> From<ErrorT> for Problem
 where
-    ErrorT: 'static + Error,
+    ErrorT: 'static + Error + Send + Sync,
 {
     fn from(error: ErrorT) -> Self {
         Self {
@@ -203,16 +153,38 @@ where
     }
 }
 
-// Utils
-
-fn downcast_error_or_source<'own, ErrorT>(
-    error: &'own (dyn 'static + Error),
-) -> Option<&'own ErrorT>
+#[cfg(not(feature = "backtrace"))]
+impl<ErrorT> From<ErrorT> for Problem
 where
-    ErrorT: 'static + Error,
+    ErrorT: 'static + Error + Send + Sync,
 {
-    // Recursive!
-    error
-        .downcast_ref()
-        .or_else(|| error.source().and_then(downcast_error_or_source))
+    fn from(error: ErrorT) -> Self {
+        Self {
+            causes: [error.into()].into(),
+        }
+    }
+}
+
+impl Into<io::Error> for Problem {
+    fn into(self) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, self.into_error())
+    }
+}
+
+impl IntoIterator for Problem {
+    type Item = Cause;
+    type IntoIter = vec_deque::IntoIter<Cause>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.causes.into_iter()
+    }
+}
+
+impl<'own> IntoIterator for &'own Problem {
+    type Item = &'own Cause;
+    type IntoIter = vec_deque::Iter<'own, Cause>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.causes.iter()
+    }
 }

@@ -1,4 +1,4 @@
-use super::problem::*;
+use super::super::problem::*;
 
 use std::{error::*, fmt};
 
@@ -6,9 +6,9 @@ use std::{error::*, fmt};
 // ProblemAsError
 //
 
-/// Problem as error.
+/// Straightforward wrapper for [Problem] that adds an implementation of [Error].
 ///
-/// Straightforward wrapper for [Problem] that adds an implementation of [Error](Error).
+/// Take care to avoid adding it into a [Problem]'s causation chain.
 pub struct ProblemAsError {
     /// Problem.
     pub problem: Problem,

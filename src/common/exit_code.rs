@@ -1,4 +1,4 @@
-use super::super::{into::*, problem::*};
+use super::super::{attachment::*, into::*, problem::*, result::*};
 
 use std::{error::Error, fmt, process::*};
 
@@ -6,14 +6,7 @@ use std::{error::Error, fmt, process::*};
 // ExitCodeAttachment
 //
 
-/// Exit code [Problem] attachment.
-///
-/// Although it can be attached to any problem you can use [ExitError] for simple messages.
-#[derive(Clone, Debug)]
-pub struct ExitCodeAttachment {
-    /// Exit code.
-    pub exit_code: ExitCode,
-}
+attachment!(ExitCodeAttachment, ExitCode);
 
 impl ExitCodeAttachment {
     /// Failure.
@@ -24,17 +17,6 @@ impl ExitCodeAttachment {
     /// Success.
     pub fn success() -> Self {
         ExitCode::SUCCESS.into()
-    }
-}
-
-impl<ExitCodeT> From<ExitCodeT> for ExitCodeAttachment
-where
-    ExitCodeT: Into<ExitCode>,
-{
-    fn from(exit_code: ExitCodeT) -> Self {
-        Self {
-            exit_code: exit_code.into(),
-        }
     }
 }
 
@@ -61,7 +43,7 @@ impl WithExitCode for Problem {
     where
         ExitCodeT: Into<ExitCode>,
     {
-        self.with(ExitCodeAttachment::from(exit_code))
+        self.with(ExitCodeAttachment::from(exit_code.into()))
     }
 
     fn with_failure_exit_code(self) -> Self {

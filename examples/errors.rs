@@ -1,6 +1,6 @@
 use {
     derive_more::*,
-    problemo::*,
+    problemo::{common::*, *},
     std::{io, sync::*},
 };
 
@@ -20,22 +20,30 @@ pub fn main() -> Result<(), Problem> {
             println!("has low-level!");
         }
 
-        if problem.has(LowLevelErrors::IO) {
+        if let Some(cause) = problem.cause_of_type::<LowLevelErrors>() {
+            println!();
+            println!("has low-level!");
+            for cause in cause.iter_under() {
+                println!("  because: {}", cause.error);
+            }
+        }
+
+        if problem.has(&LowLevelErrors::IO) {
             println!();
             println!("has low-level i/o!");
         }
 
         println!();
-        for attachment in problem.attachments_of::<String>() {
+        for attachment in problem.attachments_of_type::<String>() {
             println!("string attachment: {}", attachment);
         }
 
-        if let Some(attachment) = problem.attachment_of::<String>() {
+        if let Some(attachment) = problem.attachment_of_type::<String>() {
             println!();
             println!("first string attachment: {}", attachment);
         }
 
-        for backtrace in problem.attachments_of::<backtrace::Backtrace>() {
+        for backtrace in problem.attachments_of_type::<backtrace::Backtrace>() {
             println!();
             print!("backtrace:\n{:?}", backtrace);
         }
@@ -78,7 +86,7 @@ fn do_some_io() -> Result<String, Problem> {
     hello(true)?;
 
     let locked = Mutex::new(100);
-    let _locked = locked.lock().into_concurrency_problem()?;
+    let _locked = locked.lock().into_thread_problem()?;
 
     std::fs::read_to_string("")
         .into_problem()
@@ -95,6 +103,8 @@ fn hello(ok: bool) -> Result<String, Problem> {
     if ok {
         Ok("hello".into())
     } else {
-        Err("hello failed".into_problem().with("att2".to_string()))
+        Err("hello failed"
+            .into_message_problem()
+            .with("att2".to_string()))
     }
 }

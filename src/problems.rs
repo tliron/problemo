@@ -1,6 +1,6 @@
-use super::{captured::*, problem::*, receiver::*};
+use super::{error::*, problem::*, receiver::*};
 
-use std::{any::*, collections::*, error::Error, fmt};
+use std::{any::*, collections::*, error::Error, fmt, slice, vec};
 
 //
 // Problems
@@ -62,27 +62,45 @@ impl Problems {
     }
 }
 
+impl ProblemReceiver for Problems {
+    fn give(&mut self, problem: Problem) -> Result<(), Problem> {
+        // Fail fast if critical
+        match self.is_critical(&problem) {
+            // Fail fast if critical
+            true => Err(problem),
+
+            // Otherwise, swallow
+            false => {
+                self.add(problem);
+                Ok(())
+            }
+        }
+    }
+}
+
 impl fmt::Debug for Problems {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let problems: Vec<_> = self
-            .problems
-            .iter()
-            .map(|problem| format!("{:?}", problem))
-            .collect();
-
-        write!(formatter, "{}", problems.join("\n"))
+        let mut iterator = self.into_iter().peekable();
+        while let Some(problem) = iterator.next() {
+            write!(formatter, "{:?}", problem)?;
+            if iterator.peek().is_some() {
+                writeln!(formatter)?;
+            }
+        }
+        Ok(())
     }
 }
 
 impl fmt::Display for Problems {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let problems: Vec<_> = self
-            .problems
-            .iter()
-            .map(|problem| format!("{}", problem))
-            .collect();
-
-        write!(formatter, "{}", problems.join("\n"))
+        let mut iterator = self.into_iter().peekable();
+        while let Some(problem) = iterator.next() {
+            write!(formatter, "{}", problem)?;
+            if iterator.peek().is_some() {
+                writeln!(formatter)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -97,6 +115,24 @@ impl From<Vec<Problem>> for Problems {
     }
 }
 
+impl IntoIterator for Problems {
+    type Item = Problem;
+    type IntoIter = vec::IntoIter<Problem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.problems.into_iter()
+    }
+}
+
+impl<'own> IntoIterator for &'own Problems {
+    type Item = &'own Problem;
+    type IntoIter = slice::Iter<'own, Problem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.problems.iter()
+    }
+}
+
 impl FromIterator<Problem> for Problems {
     fn from_iter<IntoIteratorT>(iterator: IntoIteratorT) -> Self
     where
@@ -108,28 +144,12 @@ impl FromIterator<Problem> for Problems {
 
 impl<ErrorT> FromIterator<ErrorT> for Problems
 where
-    ErrorT: 'static + Error,
+    ErrorT: 'static + Error + Send + Sync,
 {
     fn from_iter<IntoIteratorT>(iterator: IntoIteratorT) -> Self
     where
         IntoIteratorT: IntoIterator<Item = ErrorT>,
     {
-        Self::from_iter(iterator.into_iter().map(|error| Problem::from(error)))
-    }
-}
-
-impl ProblemReceiver for Problems {
-    fn give(&mut self, problem: Problem) -> Result<(), Problem> {
-        // Fail fast if critical
-        match self.is_critical(&problem) {
-            // Fail fast if critical
-            true => Err(problem),
-
-            // Otherwise, swallow
-            false => {
-                self.problems.push(problem);
-                Ok(())
-            }
-        }
+        Self::from_iter(iterator.into_iter().map(Problem::from))
     }
 }
